@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -10,7 +11,7 @@ import gc
 # ============================================================
 
 st.set_page_config(
-    page_title="Healthcare Data Analytics",
+    page_title="Dashboard Data Kesehatan",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -19,9 +20,75 @@ st.set_page_config(
 DATA_PATH = "data"
 CHUNK_SIZE = 10000
 
+# Pengaturan grafik
+px.defaults.template = "plotly_white"
+px.defaults.color_discrete_sequence = [
+    "#2563EB",
+    "#60A5FA",
+    "#93C5FD",
+    "#1E40AF",
+    "#64748B"
+]
+
+# CSS Dashboard
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #F8FAFC;
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 1450px;
+    }
+
+    [data-testid="stSidebar"] {
+        background-color: #FFFFFF;
+        border-right: 1px solid #E2E8F0;
+    }
+
+    [data-testid="stSidebar"] h1 {
+        color: #1E3A8A;
+        font-size: 22px;
+    }
+
+    h1, h2, h3 {
+        color: #1E293B;
+        font-weight: 650;
+    }
+
+    [data-testid="stMetric"] {
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        padding: 16px;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #64748B;
+        font-size: 14px;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #1D4ED8;
+        font-size: 27px;
+        font-weight: 650;
+    }
+
+    hr {
+        border-color: #E2E8F0;
+    }
+
+    .stCaption {
+        color: #64748B;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ============================================================
-# 2. FUNGSI LOAD DATA HEMAT MEMORI
+# 2. FUNGSI MEMUAT DATASET
 # ============================================================
 
 @st.cache_data(show_spinner=False)
@@ -73,7 +140,7 @@ def load_data(table_name):
     del chunks
     gc.collect()
 
-    # Optimasi kolom teks dengan jumlah kategori rendah
+    # Optimasi penggunaan memori
     for column in data.select_dtypes(include=["object"]).columns:
 
         unique_count = data[column].nunique(dropna=True)
@@ -89,11 +156,15 @@ def load_data(table_name):
 # 3. MEMUAT DATASET
 # ============================================================
 
-st.title("🏥 Healthcare Data Analytics")
+st.title("Dashboard Data Kesehatan")
+
+st.caption(
+    "Analisis data rekam medis elektronik menggunakan pendekatan Big Data."
+)
 
 try:
 
-    with st.spinner("Memuat dataset healthcare..."):
+    with st.spinner("Sedang memuat dataset..."):
 
         patients = load_data("patients")
         encounters = load_data("encounters")
@@ -106,8 +177,8 @@ except Exception as error:
     st.code(str(error))
 
     st.info(
-        "Periksa folder data dan pastikan seluruh file CSV "
-        "hasil ekspor dari Colab tersedia."
+        "Periksa kembali folder data dan pastikan file CSV "
+        "tersedia pada masing-masing folder dataset."
     )
 
     st.stop()
@@ -118,10 +189,10 @@ except Exception as error:
 # ============================================================
 
 required_tables = {
-    "Patients": patients,
-    "Encounters": encounters,
-    "Conditions": conditions,
-    "Observations": observations
+    "Pasien": patients,
+    "Kunjungan": encounters,
+    "Diagnosis": conditions,
+    "Observasi": observations
 }
 
 missing_tables = [
@@ -156,6 +227,7 @@ for df, columns in date_columns:
     for column in columns:
 
         if column in df.columns:
+
             df[column] = pd.to_datetime(
                 df[column],
                 errors="coerce"
@@ -166,6 +238,11 @@ for df, columns in date_columns:
 # 6. HELPER FUNCTIONS
 # ============================================================
 
+def format_number(value):
+
+    return f"{value:,.0f}".replace(",", ".")
+
+
 def metric_card(title, value, help_text=None):
 
     st.metric(
@@ -175,18 +252,12 @@ def metric_card(title, value, help_text=None):
     )
 
 
-def format_number(value):
-
-    return f"{value:,.0f}".replace(",", ".")
-
-
 def safe_value_counts(series, name, limit=None):
 
-    # Perbaikan: ubah category menjadi string sebelum fillna
     clean_series = (
         series
         .astype("string")
-        .fillna("Unknown")
+        .fillna("Tidak diketahui")
     )
 
     result = clean_series.value_counts()
@@ -197,91 +268,128 @@ def safe_value_counts(series, name, limit=None):
     return (
         result
         .rename_axis(name)
-        .reset_index(name="Total")
+        .reset_index(name="Jumlah")
     )
+
+
+def chart_layout(fig, height=400):
+
+    fig.update_layout(
+        height=height,
+        margin=dict(l=20, r=20, t=60, b=20),
+        font=dict(
+            family="Arial",
+            size=12,
+            color="#334155"
+        ),
+        title=dict(
+            font=dict(
+                size=17,
+                color="#1E293B"
+            )
+        ),
+        legend_title_text="",
+        plot_bgcolor="white",
+        paper_bgcolor="white"
+    )
+
+    return fig
+
+
+def show_page_header(title, description):
+
+    st.title(title)
+    st.write(description)
+    st.divider()
 
 
 # ============================================================
 # 7. SIDEBAR NAVIGASI
 # ============================================================
 
-st.sidebar.title("🏥 Healthcare Analytics")
+st.sidebar.title("Healthcare Analytics")
 
 st.sidebar.caption(
-    "Big Data Project | Synthea Dataset"
+    "Dashboard Analisis Data Kesehatan"
 )
 
+st.sidebar.divider()
+
 page = st.sidebar.radio(
-    "Navigasi Dashboard",
+    "Menu Dashboard",
     [
-        "Overview",
-        "Patient Analytics",
-        "Encounter Analytics",
-        "Diagnosis Analytics",
-        "Observation Analytics",
-        "Data Quality",
-        "Big Data 5Vs"
+        "Ringkasan",
+        "Data Pasien",
+        "Kunjungan",
+        "Diagnosis",
+        "Observasi Kesehatan",
+        "Kualitas Data",
+        "Analisis Big Data 5Vs"
     ]
 )
 
 st.sidebar.divider()
 
-st.sidebar.caption("Data Source: Synthea Synthetic Dataset")
-st.sidebar.caption("Processing: PySpark + Python")
-st.sidebar.caption("Visualization: Streamlit + Plotly")
+st.sidebar.caption("Sumber Data")
+st.sidebar.write("Synthea Synthetic Patient Records")
+
+st.sidebar.caption("Teknologi")
+st.sidebar.write("PySpark, Python, Streamlit, dan Plotly")
+
+st.sidebar.divider()
+
+st.sidebar.caption("Proyek UTS Big Data")
 
 
 # ============================================================
-# 8. OVERVIEW
+# 8. HALAMAN RINGKASAN
 # ============================================================
 
-if page == "Overview":
+if page == "Ringkasan":
 
-    st.title("Healthcare Data Analytics Dashboard")
-
-    st.write(
-        "Visualisasi dan analisis data rekam medis elektronik "
-        "menggunakan pendekatan Big Data."
+    show_page_header(
+        "Ringkasan Data Kesehatan",
+        "Halaman ini menampilkan gambaran umum data pasien, "
+        "kunjungan, diagnosis, dan hasil observasi kesehatan."
     )
 
-    st.divider()
-
+    # Statistik utama
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         metric_card(
-            "Total Patients",
+            "Jumlah Pasien",
             format_number(len(patients))
         )
 
     with col2:
         metric_card(
-            "Total Encounters",
+            "Jumlah Kunjungan",
             format_number(len(encounters))
         )
 
     with col3:
         metric_card(
-            "Total Conditions",
+            "Jumlah Diagnosis",
             format_number(len(conditions))
         )
 
     with col4:
         metric_card(
-            "Total Observations",
+            "Jumlah Observasi",
             format_number(len(observations))
         )
 
-    st.subheader("Ringkasan Dataset")
+    st.subheader("Jumlah Data pada Setiap Tabel")
 
     summary = pd.DataFrame({
         "Dataset": [
-            "Patients",
-            "Encounters",
-            "Conditions",
-            "Observations"
+            "Pasien",
+            "Kunjungan",
+            "Diagnosis",
+            "Observasi"
         ],
-        "Total Records": [
+        "Jumlah Data": [
             len(patients),
             len(encounters),
             len(conditions),
@@ -296,15 +404,25 @@ if page == "Overview":
         fig = px.bar(
             summary,
             x="Dataset",
-            y="Total Records",
+            y="Jumlah Data",
             color="Dataset",
-            title="Jumlah Record Setiap Dataset",
-            text_auto=".2s"
+            text="Jumlah Data",
+            title="Perbandingan Jumlah Data"
+        )
+
+        fig.update_traces(
+            texttemplate="%{text:,.0f}",
+            textposition="outside"
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig),
             use_container_width=True
+        )
+
+        st.caption(
+            "Grafik memperlihatkan jumlah record pada "
+            "masing-masing tabel utama."
         )
 
     with col2:
@@ -312,37 +430,48 @@ if page == "Overview":
         fig = px.pie(
             summary,
             names="Dataset",
-            values="Total Records",
-            title="Distribusi Record Dataset",
+            values="Jumlah Data",
+            title="Persentase Data",
             hole=0.45
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig),
             use_container_width=True
         )
 
-    st.subheader("Informasi Dataset")
+        st.caption(
+            "Grafik menunjukkan perbandingan proporsi "
+            "jumlah record dari setiap tabel."
+        )
+
+    st.subheader("Tentang Dataset")
 
     st.write("""
-    Dataset menggunakan Synthea Synthetic Patient Records,
-    yaitu data rekam medis sintetis yang mencakup informasi pasien,
-    kunjungan medis, diagnosis, dan hasil observasi kesehatan.
+    Dataset yang digunakan berasal dari Synthea Synthetic Patient Records.
+    Dataset ini berisi informasi pasien, riwayat kunjungan medis,
+    diagnosis, dan hasil pengukuran kesehatan.
 
-    Data yang digunakan merupakan data sintetis, bukan data pasien asli.
+    Data Synthea merupakan data sintetis yang dibuat menggunakan simulasi,
+    sehingga bukan berasal dari rekam medis pasien sungguhan.
     """)
 
+    st.info(
+        "Jumlah keseluruhan record merupakan penjumlahan dari empat tabel. "
+        "Angka tersebut bukan jumlah pasien unik."
+    )
+
 
 # ============================================================
-# 9. PATIENT ANALYTICS
+# 9. HALAMAN DATA PASIEN
 # ============================================================
 
-elif page == "Patient Analytics":
+elif page == "Data Pasien":
 
-    st.title("Patient Analytics")
-
-    st.write(
-        "Analisis karakteristik demografi pasien."
+    show_page_header(
+        "Analisis Data Pasien",
+        "Halaman ini menampilkan karakteristik demografi pasien "
+        "berdasarkan informasi yang tersedia dalam dataset."
     )
 
     col1, col2 = st.columns(2)
@@ -353,20 +482,25 @@ elif page == "Patient Analytics":
 
             gender_data = safe_value_counts(
                 patients["GENDER"],
-                "Gender"
+                "Jenis Kelamin"
             )
 
             fig = px.pie(
                 gender_data,
-                names="Gender",
-                values="Total",
-                title="Distribusi Gender Pasien",
+                names="Jenis Kelamin",
+                values="Jumlah",
+                title="Distribusi Jenis Kelamin",
                 hole=0.4
             )
 
             st.plotly_chart(
-                fig,
+                chart_layout(fig),
                 use_container_width=True
+            )
+
+            st.caption(
+                "Menunjukkan jumlah pasien berdasarkan "
+                "kategori jenis kelamin."
             )
 
     with col2:
@@ -375,35 +509,35 @@ elif page == "Patient Analytics":
 
             race_data = safe_value_counts(
                 patients["RACE"],
-                "Race"
+                "Kelompok Ras"
             )
 
             fig = px.bar(
-                race_data,
-                x="Total",
-                y="Race",
+                race_data.sort_values("Jumlah"),
+                x="Jumlah",
+                y="Kelompok Ras",
                 orientation="h",
-                title="Distribusi Race Pasien"
+                title="Distribusi Kelompok Ras"
             )
 
             st.plotly_chart(
-                fig,
+                chart_layout(fig),
                 use_container_width=True
             )
 
-    st.subheader("Ringkasan Pasien")
+            st.caption(
+                "Menampilkan persebaran pasien berdasarkan "
+                "kategori ras yang tercatat."
+            )
+
+    st.subheader("Status Pernikahan")
 
     if "MARITAL" in patients.columns:
 
         marital = safe_value_counts(
             patients["MARITAL"],
-            "Status"
+            "Status Pernikahan"
         )
-
-        marital.columns = [
-            "Status",
-            "Jumlah Pasien"
-        ]
 
         st.dataframe(
             marital,
@@ -412,43 +546,54 @@ elif page == "Patient Analytics":
         )
 
     st.caption(
-        "Dashboard hanya menampilkan data agregat, "
-        "bukan identitas pribadi pasien."
+        "Analisis ditampilkan dalam bentuk agregat dan tidak "
+        "menampilkan identitas pribadi pasien."
     )
 
 
 # ============================================================
-# 10. ENCOUNTER ANALYTICS
+# 10. HALAMAN KUNJUNGAN
 # ============================================================
 
-elif page == "Encounter Analytics":
+elif page == "Kunjungan":
 
-    st.title("Encounter Analytics")
-
-    st.write(
-        "Analisis aktivitas kunjungan dan pelayanan kesehatan."
+    show_page_header(
+        "Analisis Kunjungan Pasien",
+        "Halaman ini menampilkan jenis pelayanan dan perubahan "
+        "jumlah kunjungan pasien dari waktu ke waktu."
     )
 
     if "ENCOUNTERCLASS" in encounters.columns:
 
         encounter_class = safe_value_counts(
             encounters["ENCOUNTERCLASS"],
-            "Encounter Class"
+            "Jenis Kunjungan"
         )
 
         fig = px.bar(
-            encounter_class,
-            x="Encounter Class",
-            y="Total",
-            color="Encounter Class",
-            title="Distribusi Jenis Kunjungan",
-            text_auto=True
+            encounter_class.sort_values("Jumlah"),
+            x="Jenis Kunjungan",
+            y="Jumlah",
+            color="Jenis Kunjungan",
+            text="Jumlah",
+            title="Jumlah Kunjungan Berdasarkan Jenis"
+        )
+
+        fig.update_traces(
+            textposition="outside"
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig),
             use_container_width=True
         )
+
+        st.caption(
+            "Grafik menunjukkan jumlah kunjungan untuk setiap "
+            "jenis pelayanan kesehatan."
+        )
+
+    st.divider()
 
     if "START" in encounters.columns:
 
@@ -456,27 +601,37 @@ elif page == "Encounter Analytics":
             encounters
             .dropna(subset=["START"])
             .assign(
-                Month=lambda x:
+                Bulan=lambda x:
                 x["START"].dt.to_period("M").astype(str)
             )
-            .groupby("Month")
+            .groupby("Bulan")
             .size()
-            .reset_index(name="Total Visits")
+            .reset_index(name="Jumlah Kunjungan")
         )
 
-        monthly = monthly.sort_values("Month")
+        monthly = monthly.sort_values("Bulan")
 
         fig = px.line(
             monthly,
-            x="Month",
-            y="Total Visits",
+            x="Bulan",
+            y="Jumlah Kunjungan",
             markers=True,
-            title="Tren Kunjungan Berdasarkan Bulan"
+            title="Tren Kunjungan Pasien per Bulan"
+        )
+
+        fig.update_traces(
+            line=dict(width=3),
+            marker=dict(size=7)
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig),
             use_container_width=True
+        )
+
+        st.caption(
+            "Grafik memperlihatkan perubahan jumlah kunjungan "
+            "berdasarkan bulan pada data yang tersedia."
         )
 
     if "TOTAL_CLAIM_COST" in encounters.columns:
@@ -488,50 +643,62 @@ elif page == "Encounter Analytics":
 
         average_cost = claim_cost.mean()
 
-        st.metric(
-            "Rata-rata Total Claim Cost",
+        st.subheader("Rata-rata Biaya Klaim")
+
+        metric_card(
+            "Rata-rata Total Biaya Klaim",
             (
                 f"${average_cost:,.2f}"
                 if pd.notna(average_cost)
-                else "N/A"
+                else "Tidak tersedia"
             )
+        )
+
+        st.caption(
+            "Nilai dihitung berdasarkan kolom TOTAL_CLAIM_COST "
+            "yang dapat dikonversi menjadi angka."
         )
 
 
 # ============================================================
-# 11. DIAGNOSIS ANALYTICS
+# 11. HALAMAN DIAGNOSIS
 # ============================================================
 
-elif page == "Diagnosis Analytics":
+elif page == "Diagnosis":
 
-    st.title("Diagnosis Analytics")
-
-    st.write(
-        "Analisis distribusi kondisi dan diagnosis pasien."
+    show_page_header(
+        "Analisis Diagnosis",
+        "Halaman ini menampilkan kondisi kesehatan yang paling "
+        "sering tercatat dalam data rekam medis."
     )
 
     if "DESCRIPTION" in conditions.columns:
 
         top_conditions = safe_value_counts(
             conditions["DESCRIPTION"],
-            "Diagnosis",
+            "Nama Diagnosis",
             limit=15
         )
 
         fig = px.bar(
-            top_conditions.sort_values("Total"),
-            x="Total",
-            y="Diagnosis",
+            top_conditions.sort_values("Jumlah"),
+            x="Jumlah",
+            y="Nama Diagnosis",
             orientation="h",
-            title="15 Diagnosis Paling Sering Ditemukan"
+            title="15 Diagnosis yang Paling Sering Tercatat"
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig, height=550),
             use_container_width=True
         )
 
-        st.subheader("Data Diagnosis")
+        st.caption(
+            "Grafik menampilkan 15 kondisi kesehatan dengan "
+            "jumlah pencatatan terbanyak."
+        )
+
+        st.subheader("Tabel Diagnosis")
 
         st.dataframe(
             top_conditions,
@@ -539,58 +706,76 @@ elif page == "Diagnosis Analytics":
             hide_index=True
         )
 
+    else:
+
+        st.warning(
+            "Kolom DESCRIPTION tidak ditemukan pada dataset diagnosis."
+        )
+
 
 # ============================================================
-# 12. OBSERVATION ANALYTICS
+# 12. HALAMAN OBSERVASI KESEHATAN
 # ============================================================
 
-elif page == "Observation Analytics":
+elif page == "Observasi Kesehatan":
 
-    st.title("Observation Analytics")
-
-    st.write(
-        "Analisis hasil pengukuran dan observasi kesehatan."
+    show_page_header(
+        "Analisis Hasil Observasi Kesehatan",
+        "Halaman ini menampilkan kategori dan jenis pengukuran "
+        "kesehatan yang tercatat dalam dataset."
     )
 
     if "CATEGORY" in observations.columns:
 
         category_data = safe_value_counts(
             observations["CATEGORY"],
-            "Category"
+            "Kategori"
         )
 
         fig = px.pie(
             category_data,
-            names="Category",
-            values="Total",
+            names="Kategori",
+            values="Jumlah",
             title="Distribusi Kategori Observasi",
             hole=0.4
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig),
             use_container_width=True
         )
+
+        st.caption(
+            "Grafik menunjukkan pembagian observasi berdasarkan "
+            "kategori pengukuran kesehatan."
+        )
+
+    st.divider()
 
     if "DESCRIPTION" in observations.columns:
 
         top_observations = safe_value_counts(
             observations["DESCRIPTION"],
-            "Observation",
+            "Jenis Observasi",
             limit=15
         )
 
         fig = px.bar(
-            top_observations.sort_values("Total"),
-            x="Total",
-            y="Observation",
+            top_observations.sort_values("Jumlah"),
+            x="Jumlah",
+            y="Jenis Observasi",
             orientation="h",
             title="15 Jenis Observasi Terbanyak"
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig, height=550),
             use_container_width=True
+        )
+
+        st.caption(
+            "Menampilkan jenis pengukuran kesehatan yang paling "
+            "banyak tercatat dalam dataset."
         )
 
     if "VALUE" in observations.columns:
@@ -605,7 +790,7 @@ elif page == "Observation Analytics":
         with col1:
 
             metric_card(
-                "Total Observasi Numerik",
+                "Observasi Numerik",
                 format_number(
                     numeric_values.notna().sum()
                 )
@@ -614,7 +799,7 @@ elif page == "Observation Analytics":
         with col2:
 
             metric_card(
-                "Total Observasi Non-Numerik",
+                "Observasi Non-Numerik",
                 format_number(
                     numeric_values.isna().sum()
                 )
@@ -622,21 +807,21 @@ elif page == "Observation Analytics":
 
         st.caption(
             "Nilai yang tidak dapat dikonversi menjadi angka "
-            "dikelompokkan sebagai non-numerik. "
-            "Hal ini tidak otomatis berarti data salah."
+            "dikelompokkan sebagai non-numerik. Hal ini tidak "
+            "selalu menunjukkan kesalahan data."
         )
 
 
 # ============================================================
-# 13. DATA QUALITY
+# 13. HALAMAN KUALITAS DATA
 # ============================================================
 
-elif page == "Data Quality":
+elif page == "Kualitas Data":
 
-    st.title("Data Quality Analysis")
-
-    st.write(
-        "Pemeriksaan kelengkapan dan konsistensi data."
+    show_page_header(
+        "Pemeriksaan Kualitas Data",
+        "Halaman ini digunakan untuk memeriksa kelengkapan, "
+        "nilai kosong, dan duplikasi pada setiap dataset."
     )
 
     selected_table = st.selectbox(
@@ -649,18 +834,41 @@ elif page == "Data Quality":
     missing_values = df.isnull().sum()
 
     quality = pd.DataFrame({
-        "Column": df.columns,
-        "Missing Values": missing_values.values,
-        "Missing (%)": (
+        "Nama Kolom": df.columns,
+        "Data Kosong": missing_values.values,
+        "Persentase Kosong": (
             df.isnull().mean().values * 100
         ).round(2),
-        "Unique Values": [
+        "Nilai Unik": [
             df[col].nunique(dropna=True)
             for col in df.columns
         ]
     })
 
-    st.subheader("Kelengkapan Data")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        metric_card(
+            "Jumlah Record",
+            format_number(len(df))
+        )
+
+    with col2:
+
+        metric_card(
+            "Jumlah Kolom",
+            format_number(len(df.columns))
+        )
+
+    with col3:
+
+        metric_card(
+            "Baris Duplikat",
+            format_number(df.duplicated().sum())
+        )
+
+    st.subheader("Kelengkapan Setiap Kolom")
 
     st.dataframe(
         quality,
@@ -668,131 +876,114 @@ elif page == "Data Quality":
         hide_index=True
     )
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        metric_card(
-            "Total Records",
-            format_number(len(df))
-        )
-
-    with col2:
-
-        metric_card(
-            "Total Columns",
-            format_number(len(df.columns))
-        )
-
-    with col3:
-
-        metric_card(
-            "Duplicate Rows",
-            format_number(df.duplicated().sum())
-        )
+    st.subheader("Persentase Data Kosong")
 
     fig = px.bar(
         quality.sort_values(
-            "Missing (%)",
-            ascending=False
+            "Persentase Kosong",
+            ascending=True
         ),
-        x="Missing (%)",
-        y="Column",
+        x="Persentase Kosong",
+        y="Nama Kolom",
         orientation="h",
-        title="Persentase Missing Values per Kolom"
+        title="Persentase Data Kosong per Kolom"
     )
 
     st.plotly_chart(
-        fig,
+        chart_layout(fig, height=550),
         use_container_width=True
     )
 
     st.info(
-        "Nilai kosong perlu ditafsirkan berdasarkan konteks. "
-        "Contohnya, DEATHDATE yang kosong dapat berarti pasien masih hidup."
+        "Data kosong tidak selalu berarti kesalahan. "
+        "Contohnya, DEATHDATE yang kosong dapat menunjukkan "
+        "bahwa informasi tanggal kematian tidak tersedia."
     )
 
 
 # ============================================================
-# 14. BIG DATA 5Vs
+# 14. HALAMAN ANALISIS BIG DATA 5Vs
 # ============================================================
 
-elif page == "Big Data 5Vs":
+elif page == "Analisis Big Data 5Vs":
 
-    st.title("Big Data 5Vs Analysis")
-
-    st.write(
-        "Evaluasi karakteristik Big Data pada dataset kesehatan."
+    show_page_header(
+        "Karakteristik Big Data (5Vs)",
+        "Analisis karakteristik dataset kesehatan berdasarkan "
+        "lima aspek utama dalam konsep Big Data."
     )
 
     # --------------------------------------------------------
     # VOLUME
     # --------------------------------------------------------
 
-    st.subheader("1. Volume")
+    st.subheader("1. Volume (Jumlah Data)")
 
     volume_data = pd.DataFrame({
         "Dataset": list(required_tables.keys()),
-        "Records": [
+        "Jumlah Record": [
             len(df)
             for df in required_tables.values()
         ]
     })
 
-    total_records = volume_data["Records"].sum()
+    total_records = volume_data["Jumlah Record"].sum()
 
-    st.metric(
-        "Total Records Empat Tabel",
+    metric_card(
+        "Total Record Empat Tabel",
         format_number(total_records)
     )
 
     fig = px.bar(
         volume_data,
         x="Dataset",
-        y="Records",
+        y="Jumlah Record",
         color="Dataset",
-        title="Volume Data per Tabel",
-        text_auto=True
+        title="Jumlah Data pada Setiap Tabel"
     )
 
     st.plotly_chart(
-        fig,
+        chart_layout(fig),
         use_container_width=True
     )
 
     st.write(
-        "Volume menunjukkan jumlah dan skala data yang diproses. "
-        "Empat tabel utama memiliki lebih dari 600 ribu record "
-        "dengan struktur dan hubungan data yang berbeda."
+        "Volume menunjukkan banyaknya data yang dikelola. "
+        "Empat tabel utama memiliki ratusan ribu record dengan "
+        "jenis informasi yang berbeda."
     )
+
+    st.divider()
 
     # --------------------------------------------------------
     # VELOCITY
     # --------------------------------------------------------
 
-    st.subheader("2. Velocity")
+    st.subheader("2. Velocity (Kecepatan Data)")
 
     st.info(
-        "Dataset Synthea yang digunakan merupakan data historis statis. "
-        "Dashboard ini belum mengukur kecepatan kedatangan data secara "
-        "real-time. Pengukuran ingestion rate dan processing latency "
-        "dilakukan pada proses pipeline di notebook PySpark."
+        "Dataset Synthea yang digunakan merupakan data historis "
+        "statis. Dashboard ini belum menerima data secara real-time. "
+        "Pengukuran ingestion rate dan processing latency dilakukan "
+        "pada proses pipeline di notebook PySpark."
     )
+
+    st.divider()
 
     # --------------------------------------------------------
     # VARIETY
     # --------------------------------------------------------
 
-    st.subheader("3. Variety")
+    st.subheader("3. Variety (Variasi Data)")
 
     variety_data = pd.DataFrame({
         "Dataset": [
-            "Patients",
-            "Encounters",
-            "Conditions",
-            "Observations"
+            "Pasien",
+            "Kunjungan",
+            "Diagnosis",
+            "Observasi"
         ],
-        "Columns": [
+        "Jumlah Kolom": [
             len(patients.columns),
             len(encounters.columns),
             len(conditions.columns),
@@ -807,16 +998,19 @@ elif page == "Big Data 5Vs":
     )
 
     st.write(
-        "Data CSV memiliki variasi atribut dan relasi antar tabel. "
-        "Dataset FHIR JSON menjadi representasi tambahan yang "
+        "Setiap tabel memiliki atribut yang berbeda. "
+        "Data CSV digunakan sebagai sumber utama analisis, "
+        "sedangkan FHIR JSON menjadi format tambahan yang "
         "dapat diintegrasikan dalam pipeline."
     )
+
+    st.divider()
 
     # --------------------------------------------------------
     # VERACITY
     # --------------------------------------------------------
 
-    st.subheader("4. Veracity")
+    st.subheader("4. Veracity (Kualitas Data)")
 
     missing_total = sum(
         int(df.isnull().sum().sum())
@@ -839,55 +1033,57 @@ elif page == "Big Data 5Vs":
     with col1:
 
         metric_card(
-            "Total Missing Values",
+            "Total Data Kosong",
             format_number(missing_total)
         )
 
     with col2:
 
         metric_card(
-            "Missing Value Percentage",
+            "Persentase Data Kosong",
             f"{missing_percentage:.2f}%"
         )
 
     st.write(
-        "Veracity berkaitan dengan kualitas dan kepercayaan data. "
-        "Nilai kosong perlu diperiksa berdasarkan konteks atribut "
-        "dan tidak selalu dianggap sebagai kesalahan."
+        "Veracity berkaitan dengan kualitas dan tingkat kepercayaan "
+        "data. Pemeriksaan dilakukan dengan melihat nilai kosong "
+        "pada setiap tabel."
     )
+
+    st.divider()
 
     # --------------------------------------------------------
     # VALUE
     # --------------------------------------------------------
 
-    st.subheader("5. Value")
+    st.subheader("5. Value (Nilai Informasi)")
 
     if "DESCRIPTION" in conditions.columns:
 
         value_data = safe_value_counts(
             conditions["DESCRIPTION"],
-            "Diagnosis",
+            "Nama Diagnosis",
             limit=10
         )
 
         fig = px.bar(
-            value_data.sort_values("Total"),
-            x="Total",
-            y="Diagnosis",
+            value_data.sort_values("Jumlah"),
+            x="Jumlah",
+            y="Nama Diagnosis",
             orientation="h",
-            title="10 Diagnosis Terbanyak"
+            title="10 Diagnosis Paling Sering Tercatat"
         )
 
         st.plotly_chart(
-            fig,
+            chart_layout(fig, height=450),
             use_container_width=True
         )
 
         st.write(
-            "Informasi diagnosis dapat membantu memahami pola "
-            "kondisi kesehatan yang tercatat dalam dataset. "
-            "Hasil ini bersifat deskriptif dan tidak digunakan "
-            "sebagai diagnosis klinis."
+            "Data diagnosis dapat memberikan gambaran mengenai "
+            "kondisi kesehatan yang paling sering tercatat. "
+            "Hasil analisis ini bersifat deskriptif dan bukan "
+            "digunakan sebagai dasar diagnosis klinis."
         )
 
 
@@ -898,6 +1094,6 @@ elif page == "Big Data 5Vs":
 st.divider()
 
 st.caption(
-    "Healthcare Data Analytics Dashboard | "
-    "Big Data Project | Synthea Synthetic Dataset"
+    "Dashboard Analisis Data Kesehatan | "
+    "Proyek UTS Big Data | Synthea Synthetic Patient Records"
 )
