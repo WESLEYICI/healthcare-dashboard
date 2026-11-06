@@ -1,10 +1,8 @@
-<<<<<<< Updated upstream
+
 streamlit
 pandas
 plotly
-=======
 streamlit
 pandas
 plotly
->>>>>>> Stashed changes
 numpy
