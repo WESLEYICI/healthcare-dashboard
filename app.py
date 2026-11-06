@@ -6,6 +6,7 @@ import glob
 import os
 import gc
 
+
 # ============================================================
 # 1. KONFIGURASI DASHBOARD
 # ============================================================
@@ -18,10 +19,56 @@ st.set_page_config(
 )
 
 DATA_PATH = "data"
-CHUNK_SIZE = 10000
 
-# Pengaturan grafik
+# Kolom yang benar-benar diperlukan oleh dashboard.
+# Ini mengurangi penggunaan RAM saat membaca CSV.
+
+DATA_COLUMNS = {
+    "patients": [
+        "ID",
+        "BIRTHDATE",
+        "DEATHDATE",
+        "GENDER",
+        "RACE",
+        "MARITAL"
+    ],
+
+    "encounters": [
+        "ID",
+        "PATIENT",
+        "START",
+        "STOP",
+        "ENCOUNTERCLASS",
+        "TOTAL_CLAIM_COST"
+    ],
+
+    "conditions": [
+        "ID",
+        "PATIENT",
+        "ENCOUNTER",
+        "START",
+        "STOP",
+        "DESCRIPTION"
+    ],
+
+    "observations": [
+        "ID",
+        "PATIENT",
+        "ENCOUNTER",
+        "DATE",
+        "CATEGORY",
+        "DESCRIPTION",
+        "VALUE"
+    ]
+}
+
+
+# ============================================================
+# 2. PENGATURAN GRAFIK
+# ============================================================
+
 px.defaults.template = "plotly_white"
+
 px.defaults.color_discrete_sequence = [
     "#2563EB",
     "#60A5FA",
@@ -30,9 +77,15 @@ px.defaults.color_discrete_sequence = [
     "#64748B"
 ]
 
-# CSS Dashboard
-st.markdown("""
-<style>
+
+# ============================================================
+# 3. CSS DASHBOARD
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
     .stApp {
         background-color: #F8FAFC;
     }
@@ -76,6 +129,11 @@ st.markdown("""
         font-weight: 650;
     }
 
+    [data-testid="stDataFrame"] {
+        background-color: #FFFFFF;
+        border-radius: 8px;
+    }
+
     hr {
         border-color: #E2E8F0;
     }
@@ -83,23 +141,28 @@ st.markdown("""
     .stCaption {
         color: #64748B;
     }
-</style>
-""", unsafe_allow_html=True)
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ============================================================
-# 2. FUNGSI MEMUAT DATASET
+# 4. FUNGSI MEMUAT DATASET
 # ============================================================
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def load_data(table_name):
 
     folder = os.path.join(DATA_PATH, table_name)
 
+    # Mencari file hasil ekspor PySpark
     files = sorted(
         glob.glob(os.path.join(folder, "part-*.csv"))
     )
 
+    # Alternatif jika nama file bukan part-*.csv
     if not files:
         files = sorted(
             glob.glob(os.path.join(folder, "*.csv"))
@@ -110,50 +173,72 @@ def load_data(table_name):
             f"Tidak ditemukan file CSV pada folder: {folder}"
         )
 
-    chunks = []
+    required_columns = DATA_COLUMNS[table_name]
+
+    data_parts = []
 
     for file in files:
 
         try:
-            for chunk in pd.read_csv(
+
+            # Membaca header terlebih dahulu
+            available_columns = pd.read_csv(
                 file,
-                chunksize=CHUNK_SIZE,
+                nrows=0
+            ).columns.tolist()
+
+            # Memilih kolom yang tersedia dan dibutuhkan
+            selected_columns = [
+                column
+                for column in required_columns
+                if column in available_columns
+            ]
+
+            if not selected_columns:
+                raise ValueError(
+                    f"Tidak ada kolom yang sesuai pada file {file}"
+                )
+
+            # Membaca hanya kolom yang dibutuhkan
+            part = pd.read_csv(
+                file,
+                usecols=selected_columns,
                 low_memory=True,
                 on_bad_lines="error"
-            ):
-                chunks.append(chunk)
+            )
+
+            data_parts.append(part)
+
+            del part
+            gc.collect()
 
         except Exception as error:
+
             raise RuntimeError(
                 f"Gagal membaca file {file}: {error}"
             ) from error
 
-    if not chunks:
-        return pd.DataFrame()
+    # Menggabungkan file jika dataset terdiri dari beberapa bagian
+    if len(data_parts) == 1:
 
-    data = pd.concat(
-        chunks,
-        ignore_index=True,
-        copy=False
-    )
+        data = data_parts[0]
 
-    del chunks
+    else:
+
+        data = pd.concat(
+            data_parts,
+            ignore_index=True,
+            copy=False
+        )
+
+    del data_parts
     gc.collect()
-
-    # Optimasi penggunaan memori
-    for column in data.select_dtypes(include=["object"]).columns:
-
-        unique_count = data[column].nunique(dropna=True)
-        total_count = len(data)
-
-        if total_count > 0 and unique_count <= total_count * 0.5:
-            data[column] = data[column].astype("category")
 
     return data
 
 
 # ============================================================
-# 3. MEMUAT DATASET
+# 5. MEMUAT SELURUH DATASET
 # ============================================================
 
 st.title("Dashboard Data Kesehatan")
@@ -164,28 +249,32 @@ st.caption(
 
 try:
 
-    with st.spinner("Sedang memuat dataset..."):
+    with st.spinner("Sedang memuat dataset kesehatan..."):
 
         patients = load_data("patients")
+
         encounters = load_data("encounters")
+
         conditions = load_data("conditions")
+
         observations = load_data("observations")
 
 except Exception as error:
 
     st.error("Terjadi kesalahan saat membaca dataset.")
+
     st.code(str(error))
 
     st.info(
-        "Periksa kembali folder data dan pastikan file CSV "
-        "tersedia pada masing-masing folder dataset."
+        "Pastikan folder data berisi file CSV pada setiap dataset "
+        "dan ukuran file sesuai dengan kapasitas memori aplikasi."
     )
 
     st.stop()
 
 
 # ============================================================
-# 4. VALIDASI DATA
+# 6. VALIDASI DATASET
 # ============================================================
 
 required_tables = {
@@ -212,7 +301,7 @@ if missing_tables:
 
 
 # ============================================================
-# 5. KONVERSI TIPE DATA TANGGAL
+# 7. KONVERSI TIPE DATA TANGGAL
 # ============================================================
 
 date_columns = [
@@ -235,7 +324,7 @@ for df, columns in date_columns:
 
 
 # ============================================================
-# 6. HELPER FUNCTIONS
+# 8. FUNGSI BANTU
 # ============================================================
 
 def format_number(value):
@@ -276,20 +365,31 @@ def chart_layout(fig, height=400):
 
     fig.update_layout(
         height=height,
-        margin=dict(l=20, r=20, t=60, b=20),
+
+        margin=dict(
+            l=20,
+            r=20,
+            t=60,
+            b=20
+        ),
+
         font=dict(
             family="Arial",
             size=12,
             color="#334155"
         ),
+
         title=dict(
             font=dict(
                 size=17,
                 color="#1E293B"
             )
         ),
+
         legend_title_text="",
+
         plot_bgcolor="white",
+
         paper_bgcolor="white"
     )
 
@@ -299,12 +399,14 @@ def chart_layout(fig, height=400):
 def show_page_header(title, description):
 
     st.title(title)
+
     st.write(description)
+
     st.divider()
 
 
 # ============================================================
-# 7. SIDEBAR NAVIGASI
+# 9. SIDEBAR NAVIGASI
 # ============================================================
 
 st.sidebar.title("Healthcare Analytics")
@@ -330,51 +432,65 @@ page = st.sidebar.radio(
 
 st.sidebar.divider()
 
-st.sidebar.caption("Sumber Data")
-st.sidebar.write("Synthea Synthetic Patient Records")
+st.sidebar.caption("SUMBER DATA")
 
-st.sidebar.caption("Teknologi")
-st.sidebar.write("PySpark, Python, Streamlit, dan Plotly")
+st.sidebar.write(
+    "Synthea Synthetic Patient Records"
+)
+
+st.sidebar.caption("TEKNOLOGI")
+
+st.sidebar.write(
+    "PySpark, Python, Streamlit, dan Plotly"
+)
 
 st.sidebar.divider()
 
-st.sidebar.caption("Proyek UTS Big Data")
+st.sidebar.caption(
+    "Proyek UTS Big Data"
+)
 
 
 # ============================================================
-# 8. HALAMAN RINGKASAN
+# 10. HALAMAN RINGKASAN
 # ============================================================
 
 if page == "Ringkasan":
 
     show_page_header(
         "Ringkasan Data Kesehatan",
-        "Halaman ini menampilkan gambaran umum data pasien, "
-        "kunjungan, diagnosis, dan hasil observasi kesehatan."
+
+        "Gambaran umum data pasien, kunjungan, diagnosis, "
+        "dan hasil observasi kesehatan."
     )
 
     # Statistik utama
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+
         metric_card(
             "Jumlah Pasien",
             format_number(len(patients))
         )
 
     with col2:
+
         metric_card(
             "Jumlah Kunjungan",
             format_number(len(encounters))
         )
 
     with col3:
+
         metric_card(
             "Jumlah Diagnosis",
             format_number(len(conditions))
         )
 
     with col4:
+
         metric_card(
             "Jumlah Observasi",
             format_number(len(observations))
@@ -389,6 +505,7 @@ if page == "Ringkasan":
             "Diagnosis",
             "Observasi"
         ],
+
         "Jumlah Data": [
             len(patients),
             len(encounters),
@@ -421,8 +538,7 @@ if page == "Ringkasan":
         )
 
         st.caption(
-            "Grafik memperlihatkan jumlah record pada "
-            "masing-masing tabel utama."
+            "Jumlah record yang tersimpan pada setiap tabel."
         )
 
     with col2:
@@ -441,37 +557,39 @@ if page == "Ringkasan":
         )
 
         st.caption(
-            "Grafik menunjukkan perbandingan proporsi "
-            "jumlah record dari setiap tabel."
+            "Perbandingan proporsi record dari empat tabel utama."
         )
 
     st.subheader("Tentang Dataset")
 
-    st.write("""
-    Dataset yang digunakan berasal dari Synthea Synthetic Patient Records.
-    Dataset ini berisi informasi pasien, riwayat kunjungan medis,
-    diagnosis, dan hasil pengukuran kesehatan.
+    st.write(
+        """
+        Dataset berasal dari Synthea Synthetic Patient Records.
+        Data ini berisi informasi pasien, riwayat kunjungan medis,
+        diagnosis, dan hasil pengukuran kesehatan.
 
-    Data Synthea merupakan data sintetis yang dibuat menggunakan simulasi,
-    sehingga bukan berasal dari rekam medis pasien sungguhan.
-    """)
+        Synthea menghasilkan data sintetis melalui simulasi,
+        sehingga data yang digunakan bukan rekam medis pasien asli.
+        """
+    )
 
     st.info(
-        "Jumlah keseluruhan record merupakan penjumlahan dari empat tabel. "
-        "Angka tersebut bukan jumlah pasien unik."
+        "Jumlah record merupakan penjumlahan dari empat tabel, "
+        "bukan jumlah pasien unik."
     )
 
 
 # ============================================================
-# 9. HALAMAN DATA PASIEN
+# 11. HALAMAN DATA PASIEN
 # ============================================================
 
 elif page == "Data Pasien":
 
     show_page_header(
         "Analisis Data Pasien",
-        "Halaman ini menampilkan karakteristik demografi pasien "
-        "berdasarkan informasi yang tersedia dalam dataset."
+
+        "Karakteristik demografi pasien berdasarkan informasi "
+        "yang tersedia dalam dataset."
     )
 
     col1, col2 = st.columns(2)
@@ -499,8 +617,7 @@ elif page == "Data Pasien":
             )
 
             st.caption(
-                "Menunjukkan jumlah pasien berdasarkan "
-                "kategori jenis kelamin."
+                "Jumlah pasien berdasarkan kategori jenis kelamin."
             )
 
     with col2:
@@ -526,8 +643,7 @@ elif page == "Data Pasien":
             )
 
             st.caption(
-                "Menampilkan persebaran pasien berdasarkan "
-                "kategori ras yang tercatat."
+                "Persebaran pasien berdasarkan kategori ras."
             )
 
     st.subheader("Status Pernikahan")
@@ -546,21 +662,22 @@ elif page == "Data Pasien":
         )
 
     st.caption(
-        "Analisis ditampilkan dalam bentuk agregat dan tidak "
-        "menampilkan identitas pribadi pasien."
+        "Analisis ditampilkan dalam bentuk agregat, "
+        "bukan identitas pribadi pasien."
     )
 
 
 # ============================================================
-# 10. HALAMAN KUNJUNGAN
+# 12. HALAMAN KUNJUNGAN
 # ============================================================
 
 elif page == "Kunjungan":
 
     show_page_header(
         "Analisis Kunjungan Pasien",
-        "Halaman ini menampilkan jenis pelayanan dan perubahan "
-        "jumlah kunjungan pasien dari waktu ke waktu."
+
+        "Jenis pelayanan dan perubahan jumlah kunjungan "
+        "pasien dari waktu ke waktu."
     )
 
     if "ENCOUNTERCLASS" in encounters.columns:
@@ -589,8 +706,7 @@ elif page == "Kunjungan":
         )
 
         st.caption(
-            "Grafik menunjukkan jumlah kunjungan untuk setiap "
-            "jenis pelayanan kesehatan."
+            "Jumlah kunjungan untuk setiap jenis pelayanan kesehatan."
         )
 
     st.divider()
@@ -630,8 +746,8 @@ elif page == "Kunjungan":
         )
 
         st.caption(
-            "Grafik memperlihatkan perubahan jumlah kunjungan "
-            "berdasarkan bulan pada data yang tersedia."
+            "Perubahan jumlah kunjungan berdasarkan bulan "
+            "pada periode yang tersedia."
         )
 
     if "TOTAL_CLAIM_COST" in encounters.columns:
@@ -655,21 +771,21 @@ elif page == "Kunjungan":
         )
 
         st.caption(
-            "Nilai dihitung berdasarkan kolom TOTAL_CLAIM_COST "
-            "yang dapat dikonversi menjadi angka."
+            "Perhitungan berdasarkan kolom TOTAL_CLAIM_COST."
         )
 
 
 # ============================================================
-# 11. HALAMAN DIAGNOSIS
+# 13. HALAMAN DIAGNOSIS
 # ============================================================
 
 elif page == "Diagnosis":
 
     show_page_header(
         "Analisis Diagnosis",
-        "Halaman ini menampilkan kondisi kesehatan yang paling "
-        "sering tercatat dalam data rekam medis."
+
+        "Kondisi kesehatan yang paling sering tercatat "
+        "dalam data rekam medis."
     )
 
     if "DESCRIPTION" in conditions.columns:
@@ -685,7 +801,7 @@ elif page == "Diagnosis":
             x="Jumlah",
             y="Nama Diagnosis",
             orientation="h",
-            title="15 Diagnosis yang Paling Sering Tercatat"
+            title="15 Diagnosis Paling Sering Tercatat"
         )
 
         st.plotly_chart(
@@ -694,7 +810,7 @@ elif page == "Diagnosis":
         )
 
         st.caption(
-            "Grafik menampilkan 15 kondisi kesehatan dengan "
+            "Menampilkan 15 kondisi kesehatan dengan "
             "jumlah pencatatan terbanyak."
         )
 
@@ -714,15 +830,16 @@ elif page == "Diagnosis":
 
 
 # ============================================================
-# 12. HALAMAN OBSERVASI KESEHATAN
+# 14. HALAMAN OBSERVASI KESEHATAN
 # ============================================================
 
 elif page == "Observasi Kesehatan":
 
     show_page_header(
         "Analisis Hasil Observasi Kesehatan",
-        "Halaman ini menampilkan kategori dan jenis pengukuran "
-        "kesehatan yang tercatat dalam dataset."
+
+        "Kategori dan jenis pengukuran kesehatan yang "
+        "tercatat dalam dataset."
     )
 
     if "CATEGORY" in observations.columns:
@@ -746,8 +863,7 @@ elif page == "Observasi Kesehatan":
         )
 
         st.caption(
-            "Grafik menunjukkan pembagian observasi berdasarkan "
-            "kategori pengukuran kesehatan."
+            "Pembagian observasi berdasarkan kategori pengukuran."
         )
 
     st.divider()
@@ -774,14 +890,13 @@ elif page == "Observasi Kesehatan":
         )
 
         st.caption(
-            "Menampilkan jenis pengukuran kesehatan yang paling "
-            "banyak tercatat dalam dataset."
+            "Jenis pengukuran kesehatan yang paling banyak tercatat."
         )
 
     if "VALUE" in observations.columns:
 
         numeric_values = pd.to_numeric(
-            observations["VALUE"].astype("string"),
+            observations["VALUE"],
             errors="coerce"
         )
 
@@ -813,15 +928,16 @@ elif page == "Observasi Kesehatan":
 
 
 # ============================================================
-# 13. HALAMAN KUALITAS DATA
+# 15. HALAMAN KUALITAS DATA
 # ============================================================
 
 elif page == "Kualitas Data":
 
     show_page_header(
         "Pemeriksaan Kualitas Data",
-        "Halaman ini digunakan untuk memeriksa kelengkapan, "
-        "nilai kosong, dan duplikasi pada setiap dataset."
+
+        "Pemeriksaan kelengkapan, nilai kosong, dan duplikasi "
+        "pada dataset yang digunakan."
     )
 
     selected_table = st.selectbox(
@@ -835,10 +951,13 @@ elif page == "Kualitas Data":
 
     quality = pd.DataFrame({
         "Nama Kolom": df.columns,
+
         "Data Kosong": missing_values.values,
+
         "Persentase Kosong": (
             df.isnull().mean().values * 100
         ).round(2),
+
         "Nilai Unik": [
             df[col].nunique(dropna=True)
             for col in df.columns
@@ -902,13 +1021,14 @@ elif page == "Kualitas Data":
 
 
 # ============================================================
-# 14. HALAMAN ANALISIS BIG DATA 5Vs
+# 16. HALAMAN ANALISIS BIG DATA 5Vs
 # ============================================================
 
 elif page == "Analisis Big Data 5Vs":
 
     show_page_header(
         "Karakteristik Big Data (5Vs)",
+
         "Analisis karakteristik dataset kesehatan berdasarkan "
         "lima aspek utama dalam konsep Big Data."
     )
@@ -921,6 +1041,7 @@ elif page == "Analisis Big Data 5Vs":
 
     volume_data = pd.DataFrame({
         "Dataset": list(required_tables.keys()),
+
         "Jumlah Record": [
             len(df)
             for df in required_tables.values()
@@ -949,8 +1070,8 @@ elif page == "Analisis Big Data 5Vs":
 
     st.write(
         "Volume menunjukkan banyaknya data yang dikelola. "
-        "Empat tabel utama memiliki ratusan ribu record dengan "
-        "jenis informasi yang berbeda."
+        "Empat tabel utama memiliki ratusan ribu record "
+        "dengan jenis informasi yang berbeda."
     )
 
     st.divider()
@@ -983,6 +1104,7 @@ elif page == "Analisis Big Data 5Vs":
             "Diagnosis",
             "Observasi"
         ],
+
         "Jumlah Kolom": [
             len(patients.columns),
             len(encounters.columns),
@@ -1000,8 +1122,8 @@ elif page == "Analisis Big Data 5Vs":
     st.write(
         "Setiap tabel memiliki atribut yang berbeda. "
         "Data CSV digunakan sebagai sumber utama analisis, "
-        "sedangkan FHIR JSON menjadi format tambahan yang "
-        "dapat diintegrasikan dalam pipeline."
+        "sedangkan FHIR JSON menjadi format tambahan "
+        "yang dapat diintegrasikan dalam pipeline."
     )
 
     st.divider()
@@ -1045,9 +1167,9 @@ elif page == "Analisis Big Data 5Vs":
         )
 
     st.write(
-        "Veracity berkaitan dengan kualitas dan tingkat kepercayaan "
-        "data. Pemeriksaan dilakukan dengan melihat nilai kosong "
-        "pada setiap tabel."
+        "Veracity berkaitan dengan kualitas dan tingkat "
+        "kepercayaan data. Pemeriksaan dilakukan dengan "
+        "melihat nilai kosong pada setiap tabel."
     )
 
     st.divider()
@@ -1081,19 +1203,20 @@ elif page == "Analisis Big Data 5Vs":
 
         st.write(
             "Data diagnosis dapat memberikan gambaran mengenai "
-            "kondisi kesehatan yang paling sering tercatat. "
-            "Hasil analisis ini bersifat deskriptif dan bukan "
-            "digunakan sebagai dasar diagnosis klinis."
+            "kondisi kesehatan yang sering tercatat. Hasil analisis "
+            "ini bersifat deskriptif dan bukan sebagai dasar "
+            "diagnosis klinis."
         )
 
 
 # ============================================================
-# 15. FOOTER
+# 17. FOOTER
 # ============================================================
 
 st.divider()
 
 st.caption(
-    "Dashboard Analisis Data Kesehatan | "
-    "Proyek UTS Big Data | Synthea Synthetic Patient Records"
+    "Dashboard Data Kesehatan | "
+    "Proyek UTS Big Data | "
+    "Synthea Synthetic Patient Records"
 )
